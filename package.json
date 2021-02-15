@@ -1,6 +1,6 @@
 {
     "name": "@yshing/loopback-component-crud",
-    "version": "1.5.1",
+    "version": "1.5.2",
     "description": "Loopback component Rest CRUD controller mixin (patched)",
     "keywords": [
         "loopback-extension",
