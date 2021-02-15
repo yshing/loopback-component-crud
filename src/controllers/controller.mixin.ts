@@ -417,6 +417,7 @@ export function ReadControllerMixin<T extends Entity, ID>(
                     const count = await this.repository.count(filter?.where, {
                         context: this,
                     });
+                    this.response.setHeader("X-Total-Count", count.count);
                     const currentExposeHeaders = this.response.getHeader("Access-Control-Expose-Headers")
                     if (currentExposeHeaders) {
                         if (Array.isArray(currentExposeHeaders)) {
@@ -425,7 +426,7 @@ export function ReadControllerMixin<T extends Entity, ID>(
                             this.response.setHeader("Access-Control-Expose-Headers", currentExposeHeaders + ', x-total-count')
                         }
                     } else {
-                        this.response.setHeader("X-Total-Count", count.count);
+                        this.response.setHeader("Access-Control-Expose-Headers", 'x-total-count');
                     } 
                 }
 
