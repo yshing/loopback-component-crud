@@ -20,7 +20,6 @@ import {
 } from "@loopback/rest";
 import { AuthenticationMetadata, authenticate } from "@loopback/authentication";
 import { AuthorizationMetadata, authorize } from "@loopback/authorization";
-
 import { CRUDApiConfig, CRUDController } from "../types";
 
 /**
@@ -34,9 +33,8 @@ const nestedCreate = async <T extends Entity, ID>(
     context: CRUDController<T, ID>,
     models: T[]
 ): Promise<T[]> => {
-    const relationFieldsDefs = repository.entityClass.definition.relations;
     for (const [relation, metadata] of Object.entries(
-        relationFieldsDefs
+        repository.entityClass.definition.relations
     ).filter(([_, metadata]) => metadata.type === RelationType.belongsTo)) {
         const keyTo = (metadata as any).keyTo;
         const keyFrom = (metadata as any).keyFrom;
@@ -68,7 +66,7 @@ const nestedCreate = async <T extends Entity, ID>(
         models.map(async (model: any) => {
             const rawModel: any = Object.fromEntries(
                 Object.entries(model).filter(
-                    ([key]) => !relationFieldsDefs[key]
+                    ([_, value]) => typeof value !== "object"
                 )
             );
 
@@ -84,7 +82,7 @@ const nestedCreate = async <T extends Entity, ID>(
     );
 
     for (const [relation, metadata] of Object.entries(
-        relationFieldsDefs
+        repository.entityClass.definition.relations
     ).filter(([_, metadata]) => metadata.type === RelationType.hasOne)) {
         const keyTo = (metadata as any).keyTo;
         const keyFrom = (metadata as any).keyFrom;
@@ -113,7 +111,7 @@ const nestedCreate = async <T extends Entity, ID>(
     }
 
     for (const [relation, metadata] of Object.entries(
-        relationFieldsDefs
+        repository.entityClass.definition.relations
     ).filter(([_, metadata]) => metadata.type === RelationType.hasMany)) {
         const keyTo = (metadata as any).keyTo;
         const keyFrom = (metadata as any).keyFrom;
@@ -160,7 +158,7 @@ const nestedUpdate = async <T extends Entity, ID>(
     data: any
 ): Promise<number> => {
     let result = 0;
-    const relationFieldsDefs = repository.entityClass.definition.relations;
+    const relations = [];
     for (const [relation, metadata] of Object.entries(
         repository.entityClass.definition.relations
     ).filter(([_, metadata]) => metadata.type === RelationType.belongsTo)) {
@@ -173,6 +171,7 @@ const nestedUpdate = async <T extends Entity, ID>(
         const targetRepository = await targetGetter();
 
         if (data[relation]) {
+            
             const models = await repository.find(
                 { where: where },
                 { context: context }
@@ -192,7 +191,7 @@ const nestedUpdate = async <T extends Entity, ID>(
     }
 
     const rawData: any = Object.fromEntries(
-        Object.entries(data).filter(([key, value]) => !relationFieldsDefs[key])
+        Object.entries(data).filter(([_, value]) => typeof value !== "object")
     );
     result += (
         await repository.updateAll(rawData, where, {
@@ -254,7 +253,7 @@ const nestedUpdate = async <T extends Entity, ID>(
                     {
                         ...targetRepository.entityClass.buildWhereForId(
                             item[
-                            targetRepository.entityClass.getIdProperties()[0]
+                                targetRepository.entityClass.getIdProperties()[0]
                             ]
                         ),
                         [keyTo]: {
@@ -275,7 +274,7 @@ const nestedUpdate = async <T extends Entity, ID>(
  */
 export function CreateControllerMixin<T extends Entity, ID>(
     config: CRUDApiConfig,
-    authentication: (string | AuthenticationMetadata)[],
+    authentication: (string|AuthenticationMetadata)[],
     authorization: AuthorizationMetadata
 ) {
     return function <R extends MixinTarget<CRUDController<T, ID>>>(
@@ -372,18 +371,11 @@ export function CreateControllerMixin<T extends Entity, ID>(
     };
 }
 
-const normalizeAuthenticationConfigs = (
-    configs:
-        | (string | AuthenticationMetadata)[]
-        | string
-        | AuthenticationMetadata
-        | undefined,
-    defaultConfig: AuthenticationMetadata
-) => {
-    if (configs === undefined) return [defaultConfig];
+const normalizeAuthenticationConfigs = (configs: (string | AuthenticationMetadata)[] | string | AuthenticationMetadata | undefined, defaultConfig: AuthenticationMetadata) => {
+    if (configs === undefined) return [{...defaultConfig}];
     if (Array.isArray(configs)) return configs;
     return [configs];
-};
+}
 
 /**
  * Read controller mixin, add Read rest operations
@@ -391,7 +383,7 @@ const normalizeAuthenticationConfigs = (
 export function ReadControllerMixin<T extends Entity, ID>(
     config: CRUDApiConfig,
     authentication: (string | AuthenticationMetadata)[],
-    authorization: AuthorizationMetadata
+    authorization: AuthorizationMetadata,
 ) {
     return function <R extends MixinTarget<CRUDController<T, ID>>>(
         superClass: R
@@ -419,15 +411,22 @@ export function ReadControllerMixin<T extends Entity, ID>(
             })
             async readAll(
                 @param.filter(config.model) filter?: Filter<T>,
-                @param.header.boolean("x-total", { required: false })
-                xTotal?: Boolean
+                @param.header.boolean('x-total', {required: false}) xTotal?: Boolean,
             ): Promise<T[]> {
                 if (xTotal) {
                     const count = await this.repository.count(filter?.where, {
                         context: this,
                     });
-
-                    this.response.setHeader("X-Total-Count", count.count);
+                    const currentExposeHeaders = this.response.getHeader("Access-Control-Expose-Headers")
+                    if (currentExposeHeaders) {
+                        if (Array.isArray(currentExposeHeaders)) {
+                            this.response.setHeader("Access-Control-Expose-Headers", [...currentExposeHeaders, 'x-total-count'])
+                        } else {
+                            this.response.setHeader("Access-Control-Expose-Headers", currentExposeHeaders + ', x-total-count')
+                        }
+                    } else {
+                        this.response.setHeader("X-Total-Count", count.count);
+                    } 
                 }
 
                 return await this.repository.find(filter, {
@@ -451,8 +450,8 @@ export function ReadControllerMixin<T extends Entity, ID>(
                         headers: {
                             "X-Total-Count": {
                                 type: "number",
-                            },
-                        },
+                            }
+                        }
                     },
                 },
             })
@@ -488,7 +487,7 @@ export function ReadControllerMixin<T extends Entity, ID>(
  */
 export function UpdateControllerMixin<T extends Entity, ID>(
     config: CRUDApiConfig,
-    authentication: (string | AuthenticationMetadata)[],
+    authentication: (string|AuthenticationMetadata)[],
     authorization: AuthorizationMetadata
 ) {
     return function <R extends MixinTarget<CRUDController<T, ID>>>(
@@ -575,7 +574,7 @@ export function UpdateControllerMixin<T extends Entity, ID>(
  */
 export function DeleteControllerMixin<T extends Entity, ID>(
     config: CRUDApiConfig,
-    authentication: (string | AuthenticationMetadata)[],
+    authentication: (string|AuthenticationMetadata)[],
     authorization: AuthorizationMetadata
 ) {
     return function <R extends MixinTarget<CRUDController<T, ID>>>(
@@ -624,13 +623,13 @@ export function DeleteControllerMixin<T extends Entity, ID>(
 }
 
 export const defaultAuthorizationConfig = {
-    skip: true,
-};
+    skip: true
+}
 
 export const defaultAuthenticationConfig = {
     strategy: "crud",
     skip: true,
-};
+}
 
 /**
  * CRUD controller mixin, add CRUD rest operations
@@ -644,44 +643,32 @@ export function CRUDControllerMixin<T extends Entity, ID>(
         if (config.create) {
             superClass = CreateControllerMixin<T, ID>(
                 config,
-                normalizeAuthenticationConfigs(
-                    config.create.authentication,
-                    defaultAuthenticationConfig
-                ),
-                config.create.authorization ?? defaultAuthorizationConfig
+                normalizeAuthenticationConfigs(config.create.authentication, defaultAuthenticationConfig),
+                config.create.authorization || {...defaultAuthorizationConfig}
             )(superClass);
         }
 
         if (config.read) {
             superClass = ReadControllerMixin<T, ID>(
                 config,
-                normalizeAuthenticationConfigs(
-                    config.read.authentication,
-                    defaultAuthenticationConfig
-                ),
-                config.read.authorization ?? defaultAuthorizationConfig
+                normalizeAuthenticationConfigs(config.read.authentication, defaultAuthenticationConfig),
+                config.read.authorization || {...defaultAuthorizationConfig}
             )(superClass);
         }
 
         if (config.update) {
             superClass = UpdateControllerMixin<T, ID>(
                 config,
-                normalizeAuthenticationConfigs(
-                    config.update.authentication,
-                    defaultAuthenticationConfig
-                ),
-                config.update.authorization ?? defaultAuthorizationConfig
+                normalizeAuthenticationConfigs(config.update.authentication, defaultAuthenticationConfig),
+                config.update.authorization || {...defaultAuthorizationConfig}
             )(superClass);
         }
 
         if (config.delete) {
             superClass = DeleteControllerMixin<T, ID>(
                 config,
-                normalizeAuthenticationConfigs(
-                    config.delete.authentication,
-                    defaultAuthenticationConfig
-                ),
-                config.delete.authorization ?? defaultAuthorizationConfig
+                normalizeAuthenticationConfigs(config.delete.authentication, defaultAuthenticationConfig),
+                config.delete.authorization || {...defaultAuthorizationConfig}
             )(superClass);
         }
 
